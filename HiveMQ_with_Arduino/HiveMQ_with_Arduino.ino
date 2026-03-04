@@ -13,6 +13,7 @@
 
 #include "config.h"
 #include "wifi_utils.h"
+#include "xymd02_utils.h"
 #include "modulino_utils.h"
 #include "mqtt_utils.h"
 
@@ -28,8 +29,10 @@ String topicSubscribe;  // /<mac>/alarm/status
 
 // ── State ───────────────────────────────────────────────────────────
 unsigned long previousMillis = 0;
-bool allOk = false;
-bool alarmActive = false;
+bool allOk           = false;
+bool modulinoOk      = false;  // Modulino Thermo + Buzzer available
+bool xymd02Ok        = false;  // XY-MD02 RS-485 sensor available
+bool alarmActive     = false;
 bool alarmTestActive = false;
 unsigned long sosStepStart = 0;
 int sosStepIndex = 0;
@@ -61,9 +64,15 @@ void setup() {
     return;
   }
 
-  // 4. Initialize Modulino sensors
-  if (!initModulino()) {
-    Serial.println("Cannot proceed without sensors.");
+  // 4. Initialize sensors (continue if at least one succeeds)
+  modulinoOk = initModulino();
+  if (!modulinoOk) Serial.println("Warning: Modulino unavailable, continuing...");
+
+  xymd02Ok = initXYMD02();
+  if (!xymd02Ok) Serial.println("Warning: XY-MD02 unavailable, continuing...");
+
+  if (!modulinoOk && !xymd02Ok) {
+    Serial.println("Cannot proceed: no sensors available.");
     return;
   }
 
@@ -90,8 +99,8 @@ void loop() {
     connectMQTT();
   }
 
-  // SOS pattern state machine
-  if (alarmTestActive && millis() - sosStepStart >= SOS_PATTERN[sosStepIndex]) {
+  // SOS pattern state machine (buzzer requires Modulino)
+  if (modulinoOk && alarmTestActive && millis() - sosStepStart >= SOS_PATTERN[sosStepIndex]) {
     sosStepIndex++;
     if (sosStepIndex >= SOS_PATTERN_LEN) {
       // SOS complete

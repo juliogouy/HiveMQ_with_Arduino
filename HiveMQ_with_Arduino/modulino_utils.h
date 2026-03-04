@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <WiFiS3.h>
 #include "config.h"
+#include "xymd02_utils.h"
 
 // ── External references (defined in main .ino) ─────────────────────
 extern MqttClient      mqttClient;
@@ -13,6 +14,8 @@ extern ModulinoBuzzer  buzzer;
 extern String topicPublish;
 extern bool alarmActive;
 extern bool alarmTestActive;
+extern bool modulinoOk;
+extern bool xymd02Ok;
 
 // ── SOS alarm test pattern (non-blocking) ───────────────────────────
 // SOS pattern: . . . - - - . . .
@@ -71,17 +74,30 @@ bool initModulino() {
 
 // ── Publish sensor data as JSON ─────────────────────────────────────
 void publishSensorData() {
-  float temperature = thermo.getTemperature();
-  float humidity    = thermo.getHumidity();
+  // Read whichever sensors are available
+  float modulinoTemp, modulinoHum;
+  bool modulinoRead = false;
+  if (modulinoOk) {
+    modulinoTemp  = thermo.getTemperature();
+    modulinoHum   = thermo.getHumidity();
+    modulinoRead  = true;
+  }
 
-  // Alarm logic (skip if alarm test is running)
+  float xyTemp, xyHum;
+  bool xyRead = false;
+  if (xymd02Ok) {
+    xyRead = readXYMD02(xyTemp, xyHum);
+  }
+
+  // Alarm: trigger if any available sensor exceeds threshold
+  bool tempAlarm = false;
+  if (modulinoRead)        tempAlarm |= (modulinoTemp > ALARM_THRESHOLD);
+  if (xymd02Ok && xyRead)  tempAlarm |= (xyTemp > ALARM_THRESHOLD);
+
   if (!alarmTestActive) {
-    if (temperature > ALARM_THRESHOLD) {
-      alarmActive = true;
-      buzzer.tone(1000, 500);  // 1kHz tone for 500ms
-    } else {
-      alarmActive = false;
-      buzzer.noTone();
+    alarmActive = tempAlarm;
+    if (modulinoOk) {
+      alarmActive ? buzzer.tone(1000, 500) : buzzer.noTone();
     }
   }
 
@@ -90,19 +106,35 @@ void publishSensorData() {
   // Build JSON
   JsonDocument doc;
   JsonObject sensorData = doc["sensorData"].to<JsonObject>();
-  JsonArray modulinoThermo = sensorData["ModulinoThermo"].to<JsonArray>();
+  sensorData["timestamp"]   = WiFi.getTime();  // Epoch time (UTC) via NTP
+  sensorData["alarmStatus"] = alarmStatus;
 
-  JsonObject ts = modulinoThermo.add<JsonObject>();
-  ts["timestamp"] = WiFi.getTime();  // Epoch time (UTC) via NTP
+  // ModulinoThermo
+  JsonArray modulinoArr = sensorData["ModulinoThermo"].to<JsonArray>();
+  if (modulinoRead) {
+    JsonObject t = modulinoArr.add<JsonObject>();
+    t["temperature"] = serialized(String(modulinoTemp, 1));
+    JsonObject h = modulinoArr.add<JsonObject>();
+    h["humidity"] = serialized(String(modulinoHum, 1));
+  } else {
+    JsonObject e = modulinoArr.add<JsonObject>();
+    e["error"] = "not available";
+  }
 
-  JsonObject temp = modulinoThermo.add<JsonObject>();
-  temp["temperature"] = serialized(String(temperature, 1));
-
-  JsonObject hum = modulinoThermo.add<JsonObject>();
-  hum["humidity"] = serialized(String(humidity, 1));
-
-  JsonObject alarm = modulinoThermo.add<JsonObject>();
-  alarm["alarmStatus"] = alarmStatus;
+  // XY-MD02
+  JsonArray xyArr = sensorData["XYMD02"].to<JsonArray>();
+  if (!xymd02Ok) {
+    JsonObject e = xyArr.add<JsonObject>();
+    e["error"] = "not available";
+  } else if (!xyRead) {
+    JsonObject e = xyArr.add<JsonObject>();
+    e["error"] = "read failed";
+  } else {
+    JsonObject t = xyArr.add<JsonObject>();
+    t["temperature"] = serialized(String(xyTemp, 1));
+    JsonObject h = xyArr.add<JsonObject>();
+    h["humidity"] = serialized(String(xyHum, 1));
+  }
 
   // Publish
   mqttClient.beginMessage(topicPublish);

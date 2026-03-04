@@ -1,60 +1,210 @@
-# HiveMQ_Project with C++
+# HiveMQ MQTT Sensor Station
 
-Arduino Uno R4 WiFi project that will connect to the MQTT Broker HiveMQ to publish a test topic
+Arduino UNO R4 WiFi project that reads temperature and humidity from two sensors and publishes the data every 60 seconds to a HiveMQ Cloud MQTT broker over TLS. Subscribes to alarm topics to trigger a buzzer when temperature exceeds 35 °C.
+
+---
 
 ## Features
 
-- **Publish an MQTT topic "/sensorData" every 60 seconds** 
+- Publishes sensor data (temperature, humidity, alarm status) every 60 seconds via MQTT over TLS (port 8883)
+- Two independent sensors: Modulino Thermo (I2C) and XY-MD02 (RS-485 / Modbus RTU via MAX485)
+- Alarm triggers if **either** sensor exceeds 35 °C; falls back to whichever sensor is available if the other fails to initialize
+- Subscribes to alarm topics to trigger/clear the buzzer remotely via MQTT
+- Alarm test: sends SOS pattern on buzzer (`. . . — — — . . .`) when `/alarmTest` receives `"teston"`
+- MQTT topics are built dynamically using the board's WiFi MAC address
+- Resilient startup: proceeds with one sensor if the other fails to initialize
+
+---
 
 ## Hardware
 
-- Arduino UNO R4 WiFi on COM4
+| Component             | Role                                          | Interface          |
+| --------------------- | --------------------------------------------- | ------------------ |
+| Arduino UNO R4 WiFi   | Main controller + WiFi + MQTT                 | —                  |
+| Modulino Thermo       | Temperature + humidity sensor (SHT40)         | I2C (Modulino bus) |
+| Modulino Buzzer       | Alarm output (tone + SOS pattern)             | I2C (Modulino bus) |
+| XY-MD02               | Industrial temperature + humidity sensor (SHT20) | RS-485 Modbus RTU  |
+| MAX485 TTL adapter    | RS-485 ↔ UART level converter                 | UART (Serial1)     |
 
-## Configuration
+### Wiring — MAX485 + XY-MD02
 
-| Parameter                  | Default topic to publish creation                            | Description                                                  |
-| -------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `topic`                    | /"wifi board mac address"/sensorData/"json object"           | Publish sensor data every 60 seconds. Format the topic to public this data, temperature and humidity as a json object using the WiFi mac address as part of the MQTT topic |
-| MQTT Broker URL            | YOUR_HIVEMQ_BROKER.s2.eu.hivemq.cloud                       |                                                              |
-| MQTT Broker Port           | 8883                                                         |                                                              |
-| MQTT Broker User           | YOUR_MQTT_USERNAME                                           |                                                              |
-| MQTT Broker User  Password | YOUR_MQTT_PASSWORD                                           |                                                              |
-| WiFi SSID                  | YOUR_WIFI_SSID                                               |                                                              |
-| WiFi Password              | YOUR_WIFI_PASSWORD                                           |                                                              |
-| topic                      | /AlarmData, maybe on or off depends on the logic, if temperature is iqual or lower than 35 degress, alarm "off" if the temperature is over 35 degress, the alarm will be triggered by the /alarm/"status" topic. For test purposes, if the topic "/alarmTest" is received with "teston" content, please make the Modulino Buzzer generate an SOS signal with .250 second each short tone, .750 seconds each long tone and .5 seconds between tones. | Subscribe to the topic /alarm/"status": on, off              |
+```
+Arduino UNO R4 WiFi     MAX485 Module       XY-MD02
+────────────────────    ─────────────       ────────
+5V              ──────► VCC
+GND             ──────► GND
+D1 (TX1/Serial1)──────► DI
+D0 (RX1/Serial1)◄──────  RO
+D2              ──────► DE + RE (tied together)
+                          A  ◄────────────── A+
+                          B  ◄────────────── B-
+                                             VCC ◄── 5V–30V supply
+                                             GND ◄── GND
+```
 
-##json Data Format
+> **Note:** The Modulino Thermo and Buzzer connect to the Arduino via the Modulino I2C bus (dedicated connector). No extra wiring needed beyond the standard Modulino chain.
 
-Jason Object format to be published:
+---
 
-The timestamp should be of the **Epoch Time (Integer/Long)** format
+## Project Structure
+
+```
+HiveMQ with Arduino/
+├── HiveMQ_with_Arduino.ino   Main sketch: setup, loop, state variables
+├── config.h                  Credentials and constants (NOT committed — see below)
+├── wifi_utils.h              WiFi connect + MAC address helpers
+├── mqtt_utils.h              MQTT connect + incoming message handler
+├── modulino_utils.h          Modulino init, alarm logic, publishSensorData()
+├── xymd02_utils.h            XY-MD02 Modbus RTU driver (CRC16, init, read)
+├── MQTT_HiveMQ.md            This file
+└── XY-MD02_EN_datasheet.pdf  XY-MD02 sensor datasheet
+```
+
+### config.h (not committed — create locally)
+
+```cpp
+// ── WiFi credentials ────────────────────────────────────────────────
+const char WIFI_SSID[] = "YOUR_WIFI_SSID";
+const char WIFI_PASS[] = "YOUR_WIFI_PASSWORD";
+
+// ── MQTT broker settings ─────────────────────────────────────────────
+const char MQTT_BROKER[] = "YOUR_HIVEMQ_BROKER.s2.eu.hivemq.cloud";
+const int  MQTT_PORT     = 8883;
+const char MQTT_USER[]   = "YOUR_MQTT_USERNAME";
+const char MQTT_PASS[]   = "YOUR_MQTT_PASSWORD";
+
+// ── Timing ───────────────────────────────────────────────────────────
+const unsigned long PUBLISH_INTERVAL = 60000;  // ms
+const unsigned long TIMEOUT          = 5000;   // ms
+const float         ALARM_THRESHOLD  = 35.0;   // °C
+
+// ── XY-MD02 RS-485 / MAX485 settings ─────────────────────────────────
+const int  RS485_DE_RE_PIN  = 2;     // MAX485 DE+RE direction control pin
+const int  XYMD02_ADDRESS   = 0x01;  // Modbus slave address (default)
+const long RS485_BAUD       = 9600;  // 8N1, no parity
+
+// ── Topics ───────────────────────────────────────────────────────────
+const char TOPIC_ALARM_TEST[] = "/alarmTest";
+```
+
+> **Security:** `config.h` is listed in `.gitignore` and must never be committed. It contains real credentials.
+
+---
+
+## Dependencies
+
+Install via Arduino Library Manager or `arduino-cli lib install`:
+
+| Library           | Purpose                          |
+| ----------------- | -------------------------------- |
+| `WiFiS3`          | WiFi + NTP (built into R4 core)  |
+| `ArduinoMqttClient` | MQTT client over TLS           |
+| `ArduinoJson`     | JSON serialization               |
+| `Modulino`        | Modulino Thermo + Buzzer drivers |
+
+Board core: `arduino:renesas_uno` (Arduino UNO R4 WiFi)
+
+---
+
+## MQTT Topics
+
+Topics are built at runtime using the board's WiFi MAC address (no colons, uppercase):
+
+| Direction | Topic                        | Payload                        |
+| --------- | ---------------------------- | ------------------------------ |
+| Publish   | `/<MAC>/sensorData`          | JSON (see below)               |
+| Subscribe | `/<MAC>/alarm/status`        | `"on"` / `"off"`               |
+| Subscribe | `/alarmTest`                 | `"teston"` triggers SOS buzzer |
+
+---
+
+## JSON Payload Format
+
+Published every 60 seconds to `/<MAC>/sensorData`:
 
 ```json
 {
   "sensorData": {
+    "timestamp": 1741046400,
+    "alarmStatus": "alarmOff",
     "ModulinoThermo": [
-      {"timestamp": "timestamp"},
-      {"temperature": "temperature"},
-      {"humidity": "humidity"},
-      {"alarmStatus": "alarm status"}
+      {"temperature": "25.0"},
+      {"humidity": "60.0"}
+    ],
+    "XYMD02": [
+      {"temperature": "24.8"},
+      {"humidity": "58.3"}
     ]
   }
 }
 ```
 
+- `timestamp` — Epoch time (UTC) via NTP, shared across both sensors
+- `alarmStatus` — `"alarmOn"` if any available sensor exceeds 35 °C, otherwise `"alarmOff"`
+- If a sensor failed to initialize: `{"error": "not available"}`
+- If a sensor initialized but a read failed: `{"error": "read failed"}`
 
+---
 
-Hardware:
+## Alarm Logic
 
-1) Arduino Uno R4 WiFi
-2) Modulino Termo (get temperature and humidity and fill the "temperature" and "humidity" json object respsctively)
-3) Modulino Buzzer (Alarm triggered when temperature is over 35 degress and filled on the "alarmStatus" of the json obect")
+| Condition                          | Behaviour                                              |
+| ---------------------------------- | ------------------------------------------------------ |
+| Both sensors OK, either > 35 °C    | `alarmOn`, buzzer sounds 1 kHz for 500 ms              |
+| One sensor unavailable             | Alarm based solely on the working sensor               |
+| Both sensors unavailable           | Startup aborted, nothing published                     |
+| MQTT `/<MAC>/alarm/status` = `on`  | Force alarm on via remote command                      |
+| MQTT `/<MAC>/alarm/status` = `off` | Force alarm off via remote command                     |
+| MQTT `/alarmTest` = `teston`       | SOS pattern (`. . . — — — . . .`) on buzzer (non-blocking) |
 
-Upload
+> SOS pattern: 250 ms short tone, 750 ms long tone, 500 ms gaps between tones.
 
-1. Create an Arduino application to achieve the above task.
-2. Shows the IP address received by the DHCP server and wait until it is available to be shown
-3. shows the successful or not of wifi connections, MQTT Broker and modules activation
-4. shows the MQTT topics that will  subscribed and published
-5. if temperature is iqual or bellow 35 degress, fill jason object "alarmStatus" as of, otherwise, "alarmOn"
-6. Upload to the created Arduino sketch Uni R4 WiFi
+---
+
+## Build and Upload
+
+Requires [Arduino CLI](https://arduino.cc/en/software) installed.
+
+```bash
+# Install board core (once)
+arduino-cli core install arduino:renesas_uno
+
+# Install libraries (once)
+arduino-cli lib install "ArduinoMqttClient" "ArduinoJson" "Modulino"
+
+# Detect board port
+arduino-cli board list
+
+# Compile (folder name must match .ino filename)
+arduino-cli compile --fqbn arduino:renesas_uno:unor4wifi <sketch-folder>
+
+# Upload (replace COM3 with your port)
+arduino-cli upload -p COM3 --fqbn arduino:renesas_uno:unor4wifi <sketch-folder>
+```
+
+---
+
+## Serial Monitor Output (115200 baud)
+
+```
+=== HiveMQ MQTT Sensor Station ===
+
+Connecting to WiFi: YOUR_WIFI_SSID
+WiFi: OK
+IP address: 192.168.x.x
+MAC address: AA:BB:CC:DD:EE:FF
+Connecting to MQTT broker: YOUR_HIVEMQ_BROKER.s2.eu.hivemq.cloud
+MQTT Broker: OK
+Subscribed to: /AABBCCDDEEFF/alarm/status
+Subscribed to: /alarmTest
+Publishing to: /AABBCCDDEEFF/sensorData
+Modulino I2C: OK
+Modulino Thermo: OK
+Modulino Buzzer: OK
+XY-MD02 RS-485: OK
+
+All services started successfully.
+Publishing every 60 seconds...
+
+Published to /AABBCCDDEEFF/sensorData: {"sensorData":{"timestamp":1741046400,"alarmStatus":"alarmOff","ModulinoThermo":[{"temperature":"25.0"},{"humidity":"60.0"}],"XYMD02":[{"temperature":"24.8"},{"humidity":"58.3"}]}}
+```

@@ -109,20 +109,20 @@ Board core: `arduino:renesas_uno` (Arduino UNO R4 WiFi)
 ## MQTT Topics
 
 Topics are built at runtime using a short human-readable **device ID** derived from the board's MAC address.
-The device ID is computed as an FNV-1a 32-bit hash of the 6 MAC bytes, lower 24 bits formatted as 6 lowercase hex chars, prefixed with `station/`.
-Example: `station/a3f2c1` — same board always produces the same ID; ~16 million possible values.
+The device ID is computed as an FNV-1a 32-bit hash of the 6 MAC bytes, lower 24 bits formatted as 6 lowercase hex chars, prefixed with `sensor/`.
+Example: `sensor/a3f2c1` — same board always produces the same ID; ~16 million possible values.
 
 | Direction | Topic                               | Payload                        |
 | --------- | ----------------------------------- | ------------------------------ |
-| Publish   | `station/<xxxxxx>/sensorData`       | JSON (see below)               |
-| Subscribe | `station/<xxxxxx>/alarm/status`     | `"on"` / `"off"`               |
+| Publish   | `sensor/<xxxxxx>/sensorData`       | JSON (see below)               |
+| Subscribe | `sensor/<xxxxxx>/alarm/status`     | `"on"` / `"off"`               |
 | Subscribe | `/alarmTest`                        | `"teston"` triggers SOS buzzer |
 
 ---
 
 ## JSON Payload Format
 
-Published every 60 seconds to `station/<xxxxxx>/sensorData`:
+Published every 60 seconds to `sensor/<xxxxxx>/sensorData`:
 
 ```json
 {
@@ -155,8 +155,8 @@ Published every 60 seconds to `station/<xxxxxx>/sensorData`:
 | Both sensors OK, either > 35 °C    | `alarmOn`, buzzer sounds 1 kHz for 500 ms              |
 | One sensor unavailable             | Alarm based solely on the working sensor               |
 | Both sensors unavailable           | Startup aborted, nothing published                     |
-| MQTT `station/<xxxxxx>/alarm/status` = `on`  | Force alarm on via remote command             |
-| MQTT `station/<xxxxxx>/alarm/status` = `off` | Force alarm off via remote command            |
+| MQTT `sensor/<xxxxxx>/alarm/status` = `on`  | Force alarm on via remote command             |
+| MQTT `sensor/<xxxxxx>/alarm/status` = `off` | Force alarm off via remote command            |
 | MQTT `/alarmTest` = `teston`       | SOS pattern (`. . . — — — . . .`) on buzzer (non-blocking) |
 
 > SOS pattern: 250 ms short tone, 750 ms long tone, 500 ms gaps between tones.
@@ -197,10 +197,10 @@ IP address: 192.168.x.x
 MAC address: AA:BB:CC:DD:EE:FF
 Connecting to MQTT broker: YOUR_HIVEMQ_BROKER.s2.eu.hivemq.cloud
 MQTT Broker: OK
-Device ID: station/a3f2c1
-Subscribed to: station/a3f2c1/alarm/status
+Device ID: sensor/a3f2c1
+Subscribed to: sensor/a3f2c1/alarm/status
 Subscribed to: /alarmTest
-Publishing to: station/a3f2c1/sensorData
+Publishing to: sensor/a3f2c1/sensorData
 Modulino I2C: OK
 Modulino Thermo: OK
 Modulino Buzzer: OK
@@ -209,5 +209,5 @@ XY-MD02 RS-485: OK
 All services started successfully.
 Publishing every 60 seconds...
 
-Published to station/a3f2c1/sensorData: {"sensorData":{"timestamp":1741046400,"alarmStatus":"alarmOff","ModulinoThermo":[{"temperature":"25.0"},{"humidity":"60.0"}],"XYMD02":[{"temperature":"24.8"},{"humidity":"58.3"}]}}
+Published to sensor/a3f2c1/sensorData: {"sensorData":{"timestamp":1741046400,"alarmStatus":"alarmOff","ModulinoThermo":[{"temperature":"25.0"},{"humidity":"60.0"}],"XYMD02":[{"temperature":"24.8"},{"humidity":"58.3"}]}}
 ```

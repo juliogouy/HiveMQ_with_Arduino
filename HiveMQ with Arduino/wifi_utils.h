@@ -6,7 +6,7 @@
 
 // ── Build a short human-readable device ID from the MAC address ─────
 // Uses FNV-1a 32-bit hash of the 6 MAC bytes, truncated to 24 bits
-// (6 lowercase hex chars). Result: "station/<xxxxxx>"
+// (6 lowercase hex chars). Result: "sensor/<xxxxxx>"
 // Same board always produces the same ID; ~16M possible values.
 String buildDeviceId() {
   byte mac[6];
@@ -18,7 +18,7 @@ String buildDeviceId() {
   }
   char suffix[7];
   snprintf(suffix, sizeof(suffix), "%06x", hash & 0x00FFFFFFU);
-  return String("station/") + suffix;
+  return String("sensor/") + suffix;
 }
 
 // ── Get WiFi MAC address as string ──────────────────────────────────

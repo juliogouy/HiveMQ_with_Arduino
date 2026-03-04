@@ -11,7 +11,7 @@ Arduino UNO R4 WiFi project that reads temperature and humidity from two sensors
 - Alarm triggers if **either** sensor exceeds 35 °C; falls back to whichever sensor is available if the other fails to initialize
 - Subscribes to alarm topics to trigger/clear the buzzer remotely via MQTT
 - Alarm test: sends SOS pattern on buzzer (`. . . — — — . . .`) when `/alarmTest` receives `"teston"`
-- MQTT topics are built dynamically using the board's WiFi MAC address
+- MQTT topics are built dynamically using a short human-readable device ID derived from the board's WiFi MAC address
 - Resilient startup: proceeds with one sensor if the other fails to initialize
 
 ---
@@ -108,19 +108,21 @@ Board core: `arduino:renesas_uno` (Arduino UNO R4 WiFi)
 
 ## MQTT Topics
 
-Topics are built at runtime using the board's WiFi MAC address (no colons, uppercase):
+Topics are built at runtime using a short human-readable **device ID** derived from the board's MAC address.
+The device ID is computed as an FNV-1a 32-bit hash of the 6 MAC bytes, lower 24 bits formatted as 6 lowercase hex chars, prefixed with `station/`.
+Example: `station/a3f2c1` — same board always produces the same ID; ~16 million possible values.
 
-| Direction | Topic                        | Payload                        |
-| --------- | ---------------------------- | ------------------------------ |
-| Publish   | `/<MAC>/sensorData`          | JSON (see below)               |
-| Subscribe | `/<MAC>/alarm/status`        | `"on"` / `"off"`               |
-| Subscribe | `/alarmTest`                 | `"teston"` triggers SOS buzzer |
+| Direction | Topic                               | Payload                        |
+| --------- | ----------------------------------- | ------------------------------ |
+| Publish   | `station/<xxxxxx>/sensorData`       | JSON (see below)               |
+| Subscribe | `station/<xxxxxx>/alarm/status`     | `"on"` / `"off"`               |
+| Subscribe | `/alarmTest`                        | `"teston"` triggers SOS buzzer |
 
 ---
 
 ## JSON Payload Format
 
-Published every 60 seconds to `/<MAC>/sensorData`:
+Published every 60 seconds to `station/<xxxxxx>/sensorData`:
 
 ```json
 {
@@ -153,8 +155,8 @@ Published every 60 seconds to `/<MAC>/sensorData`:
 | Both sensors OK, either > 35 °C    | `alarmOn`, buzzer sounds 1 kHz for 500 ms              |
 | One sensor unavailable             | Alarm based solely on the working sensor               |
 | Both sensors unavailable           | Startup aborted, nothing published                     |
-| MQTT `/<MAC>/alarm/status` = `on`  | Force alarm on via remote command                      |
-| MQTT `/<MAC>/alarm/status` = `off` | Force alarm off via remote command                     |
+| MQTT `station/<xxxxxx>/alarm/status` = `on`  | Force alarm on via remote command             |
+| MQTT `station/<xxxxxx>/alarm/status` = `off` | Force alarm off via remote command            |
 | MQTT `/alarmTest` = `teston`       | SOS pattern (`. . . — — — . . .`) on buzzer (non-blocking) |
 
 > SOS pattern: 250 ms short tone, 750 ms long tone, 500 ms gaps between tones.
@@ -195,9 +197,10 @@ IP address: 192.168.x.x
 MAC address: AA:BB:CC:DD:EE:FF
 Connecting to MQTT broker: YOUR_HIVEMQ_BROKER.s2.eu.hivemq.cloud
 MQTT Broker: OK
-Subscribed to: /AABBCCDDEEFF/alarm/status
+Device ID: station/a3f2c1
+Subscribed to: station/a3f2c1/alarm/status
 Subscribed to: /alarmTest
-Publishing to: /AABBCCDDEEFF/sensorData
+Publishing to: station/a3f2c1/sensorData
 Modulino I2C: OK
 Modulino Thermo: OK
 Modulino Buzzer: OK
@@ -206,5 +209,5 @@ XY-MD02 RS-485: OK
 All services started successfully.
 Publishing every 60 seconds...
 
-Published to /AABBCCDDEEFF/sensorData: {"sensorData":{"timestamp":1741046400,"alarmStatus":"alarmOff","ModulinoThermo":[{"temperature":"25.0"},{"humidity":"60.0"}],"XYMD02":[{"temperature":"24.8"},{"humidity":"58.3"}]}}
+Published to station/a3f2c1/sensorData: {"sensorData":{"timestamp":1741046400,"alarmStatus":"alarmOff","ModulinoThermo":[{"temperature":"25.0"},{"humidity":"60.0"}],"XYMD02":[{"temperature":"24.8"},{"humidity":"58.3"}]}}
 ```

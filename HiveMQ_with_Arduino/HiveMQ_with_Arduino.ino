@@ -52,11 +52,12 @@ void setup() {
     return;
   }
 
-  // 2. Build MQTT topics using MAC address
-  String mac = getMacAddress();
-  mac.replace(":", "");
-  topicPublish   = "/" + mac + "/sensorData";
-  topicSubscribe = "/" + mac + "/alarm/status";
+  // 2. Build MQTT topics using human-readable device ID (FNV-1a hash of MAC)
+  String deviceId  = buildDeviceId();
+  Serial.print("Device ID: ");
+  Serial.println(deviceId);
+  topicPublish   = deviceId + "/sensorData";
+  topicSubscribe = deviceId + "/alarm/status";
 
   // 3. Connect MQTT
   if (!connectMQTT()) {

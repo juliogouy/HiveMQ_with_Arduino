@@ -4,6 +4,23 @@
 #include <WiFiS3.h>
 #include "config.h"
 
+// ── Build a short human-readable device ID from the MAC address ─────
+// Uses FNV-1a 32-bit hash of the 6 MAC bytes, truncated to 24 bits
+// (6 lowercase hex chars). Result: "station/<xxxxxx>"
+// Same board always produces the same ID; ~16M possible values.
+String buildDeviceId() {
+  byte mac[6];
+  WiFi.macAddress(mac);
+  uint32_t hash = 2166136261UL;      // FNV-1a offset basis
+  for (int i = 0; i < 6; i++) {
+    hash ^= (uint32_t)mac[i];
+    hash *= 16777619UL;              // FNV-1a prime
+  }
+  char suffix[7];
+  snprintf(suffix, sizeof(suffix), "%06x", hash & 0x00FFFFFFU);
+  return String("station/") + suffix;
+}
+
 // ── Get WiFi MAC address as string ──────────────────────────────────
 String getMacAddress() {
   byte mac[6];

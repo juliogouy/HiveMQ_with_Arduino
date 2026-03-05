@@ -65,7 +65,7 @@ void onMqttMessage(int messageSize) {
   Serial.println(payload);
 
   // Handle alarm test topic -- start SOS pattern
-  if (topic == TOPIC_ALARM_TEST && payload == "teston") {
+  if (topic == TOPIC_ALARM_TEST && payload == "setAlarmOn") {
     alarmTestActive = true;
     sosStepIndex = 0;
     sosStepStart = millis();

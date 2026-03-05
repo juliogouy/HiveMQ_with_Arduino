@@ -10,7 +10,7 @@ Arduino UNO R4 WiFi project that reads temperature and humidity from two sensors
 - Two independent sensors: Modulino Thermo (I2C) and XY-MD02 (RS-485 / Modbus RTU via MAX485)
 - Alarm triggers if **either** sensor exceeds 35 °C; falls back to whichever sensor is available if the other fails to initialize
 - Subscribes to alarm topics to trigger/clear the buzzer remotely via MQTT
-- Alarm test: sends SOS pattern on buzzer (`. . . — — — . . .`) when `/alarmTest` receives `"teston"`
+- Alarm test: sends SOS pattern on buzzer (`. . . — — — . . .`) when `/alarmTrigger` receives `"setAlarmOn"`
 - MQTT topics are built dynamically using a short human-readable device ID derived from the board's WiFi MAC address
 - Resilient startup: proceeds with one sensor if the other fails to initialize
 
@@ -84,7 +84,7 @@ const int  XYMD02_ADDRESS   = 0x01;  // Modbus slave address (default)
 const long RS485_BAUD       = 9600;  // 8N1, no parity
 
 // ── Topics ───────────────────────────────────────────────────────────
-const char TOPIC_ALARM_TEST[] = "/alarmTest";
+const char TOPIC_ALARM_TEST[] = "/alarmTrigger";
 ```
 
 > **Security:** `config.h` is listed in `.gitignore` and must never be committed. It contains real credentials.
@@ -116,7 +116,7 @@ Example: `sensor/a3f2c1` — same board always produces the same ID; ~16 million
 | --------- | ----------------------------------- | ------------------------------ |
 | Publish   | `sensor/<xxxxxx>/sensorData`       | JSON (see below)               |
 | Subscribe | `sensor/<xxxxxx>/alarm/status`     | `"on"` / `"off"`               |
-| Subscribe | `/alarmTest`                        | `"teston"` triggers SOS buzzer |
+| Subscribe | `/alarmTrigger`                     | `"setAlarmOn"` triggers SOS buzzer |
 
 ---
 
@@ -157,7 +157,7 @@ Published every 60 seconds to `sensor/<xxxxxx>/sensorData`:
 | Both sensors unavailable           | Startup aborted, nothing published                     |
 | MQTT `sensor/<xxxxxx>/alarm/status` = `on`  | Force alarm on via remote command             |
 | MQTT `sensor/<xxxxxx>/alarm/status` = `off` | Force alarm off via remote command            |
-| MQTT `/alarmTest` = `teston`       | SOS pattern (`. . . — — — . . .`) on buzzer (non-blocking) |
+| MQTT `/alarmTrigger` = `setAlarmOn` | SOS pattern (`. . . — — — . . .`) on buzzer (non-blocking) |
 
 > SOS pattern: 250 ms short tone, 750 ms long tone, 500 ms gaps between tones.
 
@@ -199,7 +199,7 @@ Connecting to MQTT broker: YOUR_HIVEMQ_BROKER.s2.eu.hivemq.cloud
 MQTT Broker: OK
 Device ID: sensor/a3f2c1
 Subscribed to: sensor/a3f2c1/alarm/status
-Subscribed to: /alarmTest
+Subscribed to: /alarmTrigger
 Publishing to: sensor/a3f2c1/sensorData
 Modulino I2C: OK
 Modulino Thermo: OK
